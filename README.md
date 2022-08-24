@@ -1,1 +1,1 @@
-# simple_ray_tracing
+# Simple Ray Tracing Program in C++
