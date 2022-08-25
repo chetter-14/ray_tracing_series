@@ -1,6 +1,8 @@
 #include <iostream>
 #include <cmath>
 #include <vector>
+#include <algorithm>
+#include <fstream>
 
 #if defined __linux__ || defined __APPLE__
 // Compiled for Linux
@@ -36,8 +38,14 @@ public:
 		return *this;
 	}
 
+	Vec3<T> operator*(const Vec3<T>& v) const { return Vec3<T>(x * v.x, y * v.y, z * v.z); }
+	Vec3<T> operator+(const Vec3<T>& v) const { return Vec3<T>(x + v.x, y + v.y, z + v.z); }
+	Vec3<T> operator-(const Vec3<T>& v) const { return Vec3<T>(x - v.x, y - v.y, z - v.z); }
+	Vec3<T> operator-() const { return Vec3<T>(-x, -y, -z); }
+	Vec3<T>& operator+=(const Vec3<T>& v) { x += v.x; y += v.y; z += v.z; return *this; }
 	T length2() const { return x * x + y * y + z * z; }
 	T length() const { return sqrt(length2()); }
+	T dot(const Vec3<T>& v) const { return x * v.x + y * v.y + z * v.z; }
 };
 
 typedef Vec3<float> Vec3f;
@@ -55,7 +63,71 @@ public:
 		: center(c), radius(r), radius2(r * r), surfaceColor(sc), emissionColor(ec), transparency(transp), reflection(refl)
 	{ }
 
+	bool intersect(const Vec3f& rayorig, const Vec3f& raydir, float& t0, float& t1) const
+	{
+		Vec3f l = center - rayorig;
+		float tca = l.dot(raydir);
+		if (tca < 0) return false;
+		float d2 = l.dot(l) - tca * tca;
+		if (d2 > radius2) return false;
+		float thc = sqrt(radius2 - d2);
+		t0 = tca - thc;
+		t1 = tca + thc;
+
+		return true;
+	}
+
 };
+
+Vec3f trace(const Vec3f& rayorig, const Vec3f& raydir, const std::vector<Sphere>& spheres, const int& depth)
+{
+	float tnear = INFINITY;
+	const Sphere* sphere = NULL;
+
+	for (unsigned int i = 0; i < spheres.size(); i++) {
+		float t0 = INFINITY, t1 = INFINITY;
+		if (spheres[i].intersect(rayorig, raydir, t0, t1)) {
+			if (t0 < 0) t0 = t1;
+			if (t0 < tnear) {
+				tnear = t0;
+				sphere = &spheres[i];
+			}
+		}
+	}
+	if (!sphere) return Vec3f(2);
+	Vec3f surfaceColor = 0;
+	Vec3f phit = rayorig + raydir * tnear;
+	Vec3f nhit = phit - sphere->center;
+	nhit.normalize();
+	
+	float bias = 1e-4;
+	bool inside = false;
+	if (raydir.dot(nhit) > 0) {
+		nhit = -nhit;
+		inside = true;
+	}
+	// no transparent object for now
+	for (unsigned int i = 0; i < spheres.size(); i++) {
+		if (spheres[i].emissionColor.x > 0) {
+			// it's a light
+			Vec3f transmission = 1;
+			Vec3f lightDirection = spheres[i].center - phit;
+			lightDirection.normalize();
+			for (unsigned int j = 0; j < spheres.size(); j++) {
+				if (i != j) {
+					float t0, t1;
+					if (spheres[j].intersect(phit, lightDirection, t0, t1)) {
+						transmission = 0;
+						break;
+					}
+				}
+			}
+			surfaceColor += sphere->surfaceColor * transmission * std::max(float(0), nhit.dot(lightDirection)) * spheres[i].emissionColor;
+		}
+	}
+
+	return surfaceColor + sphere->emissionColor;
+}
 
 
 void render(const std::vector<Sphere>& spheres)
@@ -72,9 +144,18 @@ void render(const std::vector<Sphere>& spheres)
 			float yy = (1 - 2 * ((x + 0.5) * invHeight)) * angle;
 			Vec3f raydir(xx, yy, -1);
 			raydir.normalize();
-
+			*pixel = trace(Vec3f(0), raydir, spheres, 0);
 		}
 	}
+	std::ofstream ofs("./untitled.ppm", std::ios::out | std::ios::binary);
+	ofs << "P6\n" << width << " " << height << "\n255\n";
+	for (unsigned int i = 0; i < width * height; i++) {
+		ofs << (unsigned char)(std::min(float(0), image[i].x) * 255)
+			<< (unsigned char)(std::min(float(0), image[i].y) * 255)
+			<< (unsigned char)(std::min(float(0), image[i].z) * 255);
+	}
+	ofs.close();
+	delete[] image;
 }
 
 
