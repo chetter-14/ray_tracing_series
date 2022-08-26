@@ -11,6 +11,7 @@
 #define INFINITY 1e8
 #endif
 
+// an object that represents a set of 3 elements
 template<typename T>
 class Vec3 
 {
@@ -48,7 +49,8 @@ public:
 	T dot(const Vec3<T>& v) const { return x * v.x + y * v.y + z * v.z; }
 };
 
-typedef Vec3<float> Vec3f;
+// type for a set of 3 floats
+typedef Vec3<float> Vec3f;	
 
 
 class Sphere 
@@ -63,10 +65,11 @@ public:
 		: center(c), radius(r), radius2(r * r), surfaceColor(sc), emissionColor(ec), transparency(transp), reflection(refl)
 	{ }
 
-	bool intersect(const Vec3f& rayorig, const Vec3f& raydir, float& t0, float& t1) const
+	// the description of this method is in README
+	bool intersect(const Vec3f& raySourcePoint, const Vec3f& rayVector, float& t0, float& t1) const
 	{
-		Vec3f l = center - rayorig;
-		float tca = l.dot(raydir);
+		Vec3f l = center - raySourcePoint;
+		float tca = l.dot(rayVector);
 		if (tca < 0) return false;
 		float d2 = l.dot(l) - tca * tca;
 		if (d2 > radius2) return false;
@@ -79,15 +82,15 @@ public:
 
 };
 
-Vec3f trace(const Vec3f& rayorig, const Vec3f& raydir, const std::vector<Sphere>& spheres, const int& depth)
+Vec3f trace(const Vec3f& raySourcePoint, const Vec3f& rayVector, const std::vector<Sphere>& spheres, const int& depth)
 {
 	float tnear = INFINITY;
 	const Sphere* sphere = NULL;
 
 	for (unsigned int i = 0; i < spheres.size(); i++) {
 		float t0 = INFINITY, t1 = INFINITY;
-		if (spheres[i].intersect(rayorig, raydir, t0, t1)) {
-			if (t0 < 0) t0 = t1;
+		if (spheres[i].intersect(raySourcePoint, rayVector, t0, t1)) {
+			if (t0 < 0) t0 = t1;	// if raySourcePoint is inside the sphere (?)
 			if (t0 < tnear) {
 				tnear = t0;
 				sphere = &spheres[i];
@@ -96,55 +99,64 @@ Vec3f trace(const Vec3f& rayorig, const Vec3f& raydir, const std::vector<Sphere>
 	}
 	if (!sphere) return Vec3f(2);
 	Vec3f surfaceColor = 0;
-	Vec3f phit = rayorig + raydir * tnear;
-	Vec3f nhit = phit - sphere->center;
-	nhit.normalize();
+	// the point where the ray hits a sphere
+	Vec3f hitPoint = raySourcePoint + rayVector * tnear;
+	// normal vector
+	Vec3f hitNormalVector = hitPoint - sphere->center;
+	hitNormalVector.normalize();
 	
-	float bias = 1e-4;
+	// float bias = 1e-4;
 	bool inside = false;
-	if (raydir.dot(nhit) > 0) {
-		nhit = -nhit;
+	if (rayVector.dot(hitNormalVector) > 0) {
+		hitNormalVector = -hitNormalVector;
 		inside = true;
 	}
-	// no transparent object for now
+
+	// no transparent objects for now
 	for (unsigned int i = 0; i < spheres.size(); i++) {
 		if (spheres[i].emissionColor.x > 0) {
 			// it's a light
 			Vec3f transmission = 1;
-			Vec3f lightDirection = spheres[i].center - phit;
+			Vec3f lightDirection = spheres[i].center - hitPoint;
 			lightDirection.normalize();
 			for (unsigned int j = 0; j < spheres.size(); j++) {
 				if (i != j) {
 					float t0, t1;
-					if (spheres[j].intersect(phit, lightDirection, t0, t1)) {
+					if (spheres[j].intersect(hitPoint, lightDirection, t0, t1)) {
 						transmission = 0;
 						break;
 					}
 				}
 			}
-			surfaceColor += sphere->surfaceColor * transmission * std::max(float(0), nhit.dot(lightDirection)) * spheres[i].emissionColor;
+			surfaceColor += sphere->surfaceColor * transmission 
+				* std::max(float(0), hitNormalVector.dot(lightDirection)) * spheres[i].emissionColor;
 		}
 	}
-
 	return surfaceColor + sphere->emissionColor;
 }
 
-
+// render all the pixels
 void render(const std::vector<Sphere>& spheres)
 {
-	unsigned int width = 640, height = 480;
+	unsigned int width = 640, height = 480;								// properties of the image
 	Vec3f *image = new Vec3f[width * height], *pixel = image;
-	float invWidth = 1 / float(width), invHeight = 1 / float(height);
+	
+	float invWidth = 1 / float(width), invHeight = 1 / float(height);	// used later to convert coordinates to NDC space
 	float fov = 30, aspectratio = width / float(height);
-	float angle = tan(M_PI * 0.5 * fov / 180);
+	float angleCoef = tan(M_PI * 0.5 * fov / 180);						// coefficient that allows to zoom in/out
 	// Trace rays
 	for (unsigned int y = 0; y < height; y++) {
 		for (unsigned int x = 0; x < width; x++, ++pixel) {
-			float xx = (2 * ((x + 0.5) * invWidth) - 1) * angle * aspectratio;
-			float yy = (1 - 2 * ((y + 0.5) * invHeight)) * angle;
-			Vec3f raydir(xx, yy, -1);
-			raydir.normalize();
-			*pixel = trace(Vec3f(0), raydir, spheres, 0);
+
+			// PixelNDC_x = (Pixel_x + 0.5) / ImageWidth	(Raster space -> NDC space , range[0, ImageWidth]	-> range[0, 1])
+			// PixelScreen_x = 2 * PixelNDC_x - 1			(NDC space -> Screen space , range[0, 1]			-> range[-1, 1])
+			// for pixels to remain squares multiply PixelScreen_x 
+
+			float cameraPixelX = (2 * ((x + 0.5) * invWidth) - 1) * angleCoef * aspectratio;
+			float cameraPixelY = (1 - 2 * ((y + 0.5) * invHeight)) * angleCoef;
+			Vec3f vector3D(cameraPixelX, cameraPixelY, -1);				// vector in 3d space (it goes from (0, 0, 0) )
+			vector3D.normalize();
+			*pixel = trace(Vec3f(0), vector3D, spheres, 0);
 		}
 	}
 	std::ofstream ofs("./untitled.ppm", std::ios::out | std::ios::binary);
@@ -162,12 +174,12 @@ void render(const std::vector<Sphere>& spheres)
 int main()
 {
 	std::vector<Sphere> spheres;
-	spheres.emplace_back(Sphere(Vec3f(-4.0, 0.0, -23), 2,	 Vec3f(0.90, 0.76, 0.46),	1, 0.0));
-	spheres.emplace_back(Sphere(Vec3f(4.0, 0.0, -17), 2,	 Vec3f(0.50, 0.70, 0.30),	1, 0.0));
+	spheres.emplace_back(Sphere(Vec3f(-3.0, 0.0, -20), 1,	 Vec3f(0.0, 1.0, 0.0),	1, 0.0));
+	spheres.emplace_back(Sphere(Vec3f(3.0, 0.0, -20), 2,	 Vec3f(0.0, 0.0, 1.0),	1, 0.0));
 
 
 	// light
-	spheres.emplace_back(Sphere(Vec3f(-3.0, -1.0, 0), 3, Vec3f(0.0, 0.0, 0.0),		0, 0.0, Vec3f(2)));
+	spheres.emplace_back(Sphere(Vec3f(0.0, 10.0, -20), 3, Vec3f(0.0, 0.0, 0.0),		0, 0.0, Vec3f(1)));
 
 	render(spheres);
 	return 0;
