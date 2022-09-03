@@ -1,1 +1,1 @@
-# Simple Ray Tracing Program in C++
+# Ray Tracing Programs (kind of series) in C++
